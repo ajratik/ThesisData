@@ -1,0 +1,551 @@
+---
+title: "Thesis Data Analysis"
+author: "Islamov Ayrat"
+date: "2024-06-17"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+library(dplyr)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(readr)
+library(data.table)
+```
+
+# Анализ данных эксперимента выпускной бакалаврской работы
+
+## Вводные данные
+
+Здесь представлен код, написанный мной для анализа данных полученных в
+ходе когнитивного психолгического эксперимента. Данный эксперимент был
+проведен нами в рамках выпускной квалификационной работы (ВКР),
+направленной на изучение восприятия интерфейсов. Подробнее о теме ВКР и
+её эксперментальном плане вы можете узнать из презентации,
+представленной на репозитории. Здесь я постараюсь описать лишь те части
+работы, которые необходимы для понимания логики анализа данных.
+
+Датасет представляет из себя данные проб эксперимента 99 участников, где
+каждая строка представляет из себя единичную пробу. В колонках
+представлены различные экспериментальные данные. Рассмотрим интресеующие
+нас колонки-переменные.
+
+**N.B.** Представленнные данные предвавриательно очищены от выбросов (2
+стандартных отклонения) по времени реакции (относительно ответов каждого
+испытуемого). Также данные очищены от некорректных ответов. Данные шаги
+не включены в анализ, так как затрагивают конфиденциальную информацию
+испытуемых. Далее мы будем работать с данными, не затрагивающимии
+конфиденциальную информацию.
+
+```{r import}
+df = read.csv('exp_data.csv')
+summary(df)
+```
+
+ID - индивидуальный номер участника
+
+Sex - пол (2 уровня: m/f)
+
+Age - возраст group_sk_fl_neu - экспеиментальная группа участника,
+соответвующая типу дизайна, в котором он проходил тестирование. 3
+уровня: sk - скевоморфный дизайн neu - неоморфический дизайн fl- плоский
+дизайн
+
+stim_name - имя целевого стимула, который искал на экране испытуемый
+
+stim_fav - категория знакомости стимула (2 уровня: 0 - незнакомый, 1 -
+знакомый)
+
+matrix_type - размер интерфейса, в котором инспытуемый осуществлял поиск
+(3 уровня: 1 - сетка 3х3 2 - сетка 4х4 3 - сетка 5х5)
+
+chose_targ.time - время ответа испытуемого, в секундах
+
+## Подготовка данных
+
+Для начала приведем необходимые переменные к корректному типу
+
+```{r processing}
+df$group_sk_fl_neu =as.factor(df$group_sk_fl_neu)
+df$stim_fav = as.factor(df$stim_fav)
+df$matrix_type=as.factor(df$matrix_type)
+df$ID =as.factor(df$ID)
+df$Sex =as.factor(df$Sex)
+str(df$Sex)
+```
+
+Заметим, что пол заявлен как двухуровневая факторная переменная, однако
+по данным таковой не является. Исправим это.
+
+```{r sex_manipulation}
+df$Sex = tolower(df$Sex)
+df$Sex = ifelse(df$Sex=='ж' | df$Sex=='false', 'f', df$Sex)
+df$Sex = ifelse(df$Sex=='м', 'm', df$Sex)
+df$Sex =as.factor(df$Sex)
+str(df$Sex)
+```
+
+## Обзор данных
+
+Выведем статистики, характеризующие нашу выборку (пол и возраст).
+
+```{r sample_stat}
+df[, 2:4] %>% 
+  unique() %>% 
+  select(2,3) %>% 
+  summary()
+```
+
+Выведем статистику времени поиска каждого из стимулов. Возможно есть
+смысл удалить часть из них.
+
+```{r stim_stat}
+df %>% 
+  group_by(group_sk_fl_neu, stim_name) %>% 
+  summarise(time = mean(chose_targ.time)) %>%
+  arrange(time)
+
+df %>% 
+  group_by(group_sk_fl_neu, stim_name) %>% 
+  summarise(time = mean(chose_targ.time)) %>% ungroup() %>%  shapiro_test(time)
+```
+
+Все стимулы искались в допустимых интервалах от 1.09 до 3.66 секунд.
+Распредление нормальное. Оснований для удаления проб с конкретными
+стимулами обнаружено не было.
+
+## Агрегация данных и основные описательные статистики
+
+Согласно экспериментальному плану агрегируем данные о времени реакции по
+испытуемым и ро каждому из экспериментальных условий: дизайн стимулов,
+знакомоость стимулов, количество стимулов.
+
+```{r merging_data}
+merged_data = df %>% 
+  group_by(ID, group_sk_fl_neu, matrix_type, stim_fav) %>% 
+  summarise(
+    time = mean(chose_targ.time)
+    ) %>% 
+  ungroup()
+```
+
+Взглянем на основные описательные статистики:
+
+```{r descrstat}
+merged_data %>%
+  group_by(group_sk_fl_neu, matrix_type, stim_fav
+           ) %>%
+  get_summary_stats(time, type = "mean_sd")
+```
+
+Добавим предварительную визуализацию:
+
+```{r bxp_vis}
+bxp1 <- ggboxplot(
+  merged_data,
+  y = "time",
+  x = "stim_fav", 
+  color = "matrix_type", 
+  facet.by = "group_sk_fl_neu",
+  palette = "jco",
+  short.panel.labs = FALSE
+)
+bxp1
+```
+
+Предварительно можно отметить очевидное влияние фактора размера
+интерфейса, а также наличие выбросов во всех ячейках дизайна
+эксперимента. Однако необходимо дальнейшее исследование.
+
+## Подготовка к проведению дисперсионного анализа, проверка условий.
+
+Для анализа данных мы планируем проводить трехфакторный смешанный
+дисперсионнный анализ для выявления влияния каждого из факторов и
+влияния их взаимодействия.
+
+Выведем список выбросов
+
+```{r outliers}
+merged_data %>%
+  group_by(matrix_type, group_sk_fl_neu, stim_fav) %>%
+  identify_outliers(time)
+```
+
+Как мы видим, всего 5 строчек попадают под критерий экстремальных
+выбросов (\> 3 отклонений). Будем иметь это в виду и при необходимости
+удалим.
+
+Рассмотрим нормальность распредления целевой переменной в каждой из
+ячеек дизайна
+
+```{r shap_test}
+merged_data %>%
+  group_by(matrix_type, stim_fav, group_sk_fl_neu) %>%
+  shapiro_test(time)
+```
+
+В 9 из 18 ячеек экспериментального дизайна нормальность нарушена
+согласно формальному критерию Шапиро-Уилка.
+
+Построим график распределения квантилей в качестве альтернативы оценки
+характера распредления данных.
+
+```{r qqplot, warning=FALSE}
+ggqqplot(merged_data, "time", ggtheme = theme_bw()) +
+  facet_grid(stim_fav + matrix_type ~ group_sk_fl_neu, labeller = "label_both")
+```
+
+Согласно графику можно говорить, что большинство наблюдений входят в
+доверительный интервал распредления квантилей. Лишь небольшая часть
+данных выходит за пределы доверительного интервала. Учитывая это и
+устойчивость смешанного дисперсионного анализа к выбросам и
+ненормальности данных, считаем проведение дисперсионного анализа
+допустимым.
+
+Наконец, проведем проверку равенства дисперсий у различных групп
+экспериментального дизайна.
+
+```{r levene_TEST}
+merged_data %>%
+  group_by(matrix_type, stim_fav) %>%
+  levene_test(time ~ group_sk_fl_neu)
+```
+
+Условие равнества дисперсий не нарушено. Можно переходить к проваедению
+основного анализа.
+
+## Дисперсионный смешаннный анализ. Three-WAY MIXED ANOVA
+
+Обаратим внимание на факторный дизайн: факторы размера интерфейса и
+знакомости иконки (matrix_type, stim_fav) варьировались для каждого
+участника (внутригрупповой фактор), в то время как фактор дизайна
+варьировался между испытуемыми (каждый испытунмый проходил эксперимент
+только в одном из видов дизайна).
+
+```{r ANOVA main}
+res.aov <- anova_test(
+  data = merged_data, dv = time, wid = ID,
+  between = group_sk_fl_neu, within = c(matrix_type, stim_fav)
+)
+get_anova_table(res.aov)
+```
+
+Кратко рассмотрим полученные результаты.
+
+На уровне значимости 0.05 значимыми оказались основные факторы:
+
+-размера интерфейса
+
+-знакомости стимула
+
+Также зеначимым оказалось взаимодействие факторов:
+
+-размера стимула и знакомости стимула
+
+Отметим, что размер эффекта у значимых факторов различный:
+
+-размер интерефейса обладает большим размером эффекта
+
+-знакомость стимула обладает маленьким размером эффекта
+
+-взаимодействие факторов обладает маленьким размером эффекта
+
+## Post-Hoc исследование
+
+Трехфакторное взаимодействие оказалось незначимым. Кроме того, фактор
+дизайна, а также все взаимодействия, связанные с ним, оказались
+незначимыми. Есть смысл исключить этот фактор из дальнейшего анализа и
+провести двухфакторный анализ. Не забудем про поправки для повторных
+измерений.
+
+```{r ANOVA2}
+res.aov2 <- anova_test(
+  data = merged_data, dv = time, wid = ID,
+  within = c(stim_fav, matrix_type)) %>%
+  adjust_pvalue(method = "bonferroni")
+get_anova_table(res.aov2)
+```
+
+Все исследуемые факторы оказались значимыми. Размеры эффектов остались
+прежними. Чтобы выяснить влияние взаимодействия факторов проведем
+попарный тест с поправками.
+
+```{r pair_interaction}
+pair <- merged_data %>%
+  group_by(matrix_type) %>%
+  pairwise_t_test(time ~ stim_fav, 
+                  p.adjust.method = "bonferroni", 
+                  paired = TRUE, 
+                  detailed = TRUE,
+                  var.equal = TRUE)
+pair
+```
+
+Как видно из резултатов тестов, есть значимые различия в поиске знакомых
+и незнакомых иконок наблюдаются только в случае с маленькими
+интерфейсами (matrix_type = 1)
+
+Визуалитзируем полученные результаты:
+
+(а также исправим названия осей и уровней факторов)
+
+```{r interaction_vis}
+levels(merged_data$matrix_type) <- list('3x3'  = "1", '4x4' = "2", '5x5' = '3' )
+levels(merged_data$stim_fav) <- list('незнакомые'  = "0", 'знакомые' = "1")
+levels(merged_data$matrix_type) <- list('3x3'  = "1", '4x4' = "2", '5x5' = '3' )
+bxp_interaction <- ggboxplot(
+  merged_data,
+  y = "time",
+  x = "matrix_type", 
+  color = "stim_fav", 
+  #facet.by = "group_sk_fl_neu",
+  palette = "grey",
+  short.panel.labs = FALSE,
+  xlab = 'вид матрицы',
+  ylab = 'время, с',
+  #panel.labs = list(stim = c("3х3", "4х4","5х5")),
+  outlier.shape = NA
+)
+bxp_interaction = bxp_interaction  + labs(color = "Тип приложения")
+
+pair <- pair %>% add_xy_position(x = "matrix_type") 
+pair.filtered <- pair %>% filter(matrix_type == "3x3")
+bxp_interaction + 
+  stat_pvalue_manual(pair.filtered, tip.length = 0, hide.ns = TRUE) +
+  labs(
+    subtitle = get_test_label(res.aov2, detailed = TRUE),
+    caption = get_pwc_label(pair)
+  )
+```
+
+Помимо этого визуализируем основные факторы модели.
+
+Размер интерфейса, статистики:
+
+```{r matrix_size_stat}
+pair_matrix <- merged_data %>%
+  pairwise_t_test(time ~ matrix_type, 
+                  p.adjust.method = "bonferroni", 
+                  paired = TRUE, 
+                  detailed = TRUE,
+                  var.equal = TRUE)
+pair_matrix
+```
+
+Очевидно, что с размером интерфейса время поиска увеличивается.
+Визуализируем этот эффект:
+
+```{r matrix_size_vis}
+bxp_matrix <- ggboxplot(
+  merged_data,
+  y = "time",
+  x = "matrix_type", 
+  #color = "stim_fav", 
+  #facet.by = "group_sk_fl_neu",
+  palette = "jco",
+  short.panel.labs = FALSE,
+  xlab = 'вид матрицы',
+  ylab = 'время, с',
+  #panel.labs = list(matrix_type = c("3х3", "4х4","5х5")),
+  outlier.shape = NA
+)
+#bxp_matrix = bxp_matrix + ylim(0,6)
+pair_matrix <- pair_matrix %>% add_xy_position(x = "matrix_type") 
+
+bxp_matrix + 
+  stat_pvalue_manual(pair_matrix, tip.length = 0, hide.ns = TRUE) +
+  labs(
+    subtitle = get_test_label(res.aov2, detailed = TRUE, row =2),
+    caption = get_pwc_label(pair_matrix)
+  )
+```
+
+Знакомость приложений, визулизация:
+
+(Так как фактор имеет всего два уровня, дополнительые сравнения и
+поправки вводить не будем)
+
+```{r fam_vis}
+bxp_fav <- ggboxplot(
+  merged_data,
+  y = "time",
+  x = "stim_fav", 
+  #color = "stim_fav", 
+  #facet.by = "group_sk_fl_neu",
+  palette = "jco",
+  short.panel.labs = FALSE,
+  xlab = 'знакомость приложения',
+  ylab = 'время, с', 
+  outlier.shape = NA
+)
+
+
+pair_fav <- merged_data %>%
+  pairwise_t_test(time ~ stim_fav, 
+                  p.adjust.method = "none", 
+                  paired = TRUE, 
+                  detailed = TRUE,
+                  var.equal = TRUE)
+
+pair_fav <- pair_fav %>% add_xy_position(x = "stim_fav") 
+bxp_fav + 
+  stat_pvalue_manual(pair_fav, tip.length = 0, hide.ns = TRUE) +
+  labs(
+    subtitle = get_test_label(res.aov2, detailed = TRUE, row=1)
+  )
+
+```
+
+Дополительно для последующей работы в других средах, переведем данные в
+широкий формат.
+
+```{r wide}
+wide =dcast(merged_data, ID ~ stim_fav + matrix_type, value.var = 'time')
+name_design = merged_data %>% select(group_sk_fl_neu, ID) %>% unique()
+wide = left_join(wide, name_design, 'ID')
+wide
+```
+
+## Робустные методы
+
+В случае, если соблюдение нормальности и отсутствия выбросов критично
+для исследования воспользуемся робустными методами анализа.
+
+Частным случаем является ранговая трансформация (ANOVA of Aligned Rank
+Transformed Data).
+
+```{r ANOVA_of_Aligned_Rank_Transformed_Data}
+library(ARTool)
+robust=art(
+  time~group_sk_fl_neu*stim_fav*matrix_type+(1|ID),
+  merged_data,
+  rank.comparison.digits = -floor(log10(.Machine$double.eps^0.5)),
+  check.errors.are.factors = TRUE
+)
+anova(robust)
+```
+
+В случае с этим методом мы получили похожие резултаты по основным
+эффектам, однако по взаимодействию факторов результаты отличаются от
+обычного дисперсионного анализа.
+
+Воспользуемся методом перестановок, а для ускорения процесса
+распараллелим процесс.
+
+```{r permutations}
+library(doParallel)
+library(ez)
+library(parallel)
+
+core_n = detectCores()
+registerDoParallel(cores=core_n)
+library(ez)
+ezPerm(
+  merged_data
+  , time
+  , ID
+  , within = c(matrix_type, stim_fav)
+  , between = group_sk_fl_neu
+  , perms = 1e4
+  , parallel = TRUE
+  , alarm = FALSE
+)
+```
+
+В этом случае мы получили совем другие резултаты: как по основным
+эффектам, так и по взаимодействию. Фактор дизайна остался незначимым.
+
+Посмотрим на результаты еще одного из методов, а именно степенной
+странсформации BOX-COX. Подберем коэфицент трансформации:
+
+```{r BOXCOX_coef}
+library(MASS)
+bc <- boxcox(lm(time~1, data = merged_data))
+lambda <- bc$x[which.max(bc$y)]
+merged_data$timetrans <- (merged_data$time^lambda- 1)/lambda
+```
+
+Проверим нормальность данных теперь:
+
+```{r BOXCOX_normality}
+merged_data %>%
+  group_by(matrix_type, stim_fav, group_sk_fl_neu) %>%
+  shapiro_test(timetrans)
+```
+
+Формальный критерий нормальности соблюдается теперь почти в каждой
+ячейке экпериментальнго дизайна.
+
+На графике квантилей:
+
+```{r qq_boxcox, warning=FALSE}
+ggqqplot(merged_data, "timetrans", ggtheme = theme_bw()) +
+  facet_grid(stim_fav + matrix_type ~ group_sk_fl_neu, labeller = "label_both")
+```
+
+Все наблюдения в доверительном интервале
+
+Тест на равенство дисперсий:
+
+```{r levene_boxcox}
+merged_data %>%
+  group_by(matrix_type, stim_fav) %>%
+  levene_test(timetrans ~ group_sk_fl_neu)
+```
+
+Условия для проведения диспперсионного анализа соблюдены.
+
+```{r ANOVa_BOXCOX}
+res.aov_bc <- anova_test(
+  data = merged_data, dv = timetrans, wid = ID,
+  between = group_sk_fl_neu, within = c(matrix_type, stim_fav)
+)
+get_anova_table(res.aov_bc)
+```
+
+Полученные результаты практически идентичны обычному дисперсионному
+анализу, проведенному в основной части исследованя. Единственным
+отличием является наличие значимости у **взаимодействия факторов размера
+интерфейса и его дизайна**. Учитывая, что все остальные методы
+робустного анализа также выявили его значимым, считаем необходимым
+провести дальнейшее исследование.
+
+```{r boxcox_posthoc}
+one.way_bc <- merged_data %>%
+  group_by(matrix_type) %>%
+  anova_test(dv = timetrans, wid = ID, between = group_sk_fl_neu) %>%
+  get_anova_table() %>%
+  adjust_pvalue(method = "bonferroni")
+one.way_bc
+
+```
+
+В случае с интерфейсами малого и среднего размера имеются значимые
+различия между дизайнами. Уточним, какие именно.
+
+```{r pairw_bc}
+pwc_bc <- merged_data %>%
+  group_by(matrix_type) %>%
+  pairwise_t_test(timetrans ~ group_sk_fl_neu, p.adjust.method = "bonferroni")
+pwc_bc
+```
+
+Вариант дизайна неоморфизм отличается от других варинтов в случае с
+малыми и средними интерфейсами.
+
+```{r robust_stat}
+merged_data %>%
+  group_by(group_sk_fl_neu, matrix_type
+           ) %>%
+  get_summary_stats(time, type = "robust")
+```
+
+Так как мы провели степпенную трансформамцию, говорить о конкретных
+количественных различиях мы не можем, однако судя по робустным
+статистикам мы можем говорить о том, что время поиска в малых и средних
+неоморфических интерфейсах значимо меньше, чем в других дизайнах.
