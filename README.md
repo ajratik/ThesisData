@@ -1,2 +1,4 @@
 # ThesisData
-Some code for my Thesis project
+Some data analysis code for my Thesis project
+For Thesis presentation 
+For commented code 
